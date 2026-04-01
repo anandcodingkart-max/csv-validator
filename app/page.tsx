@@ -195,16 +195,6 @@ export default function Home() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
-                  <img
-                    src="https://driftcharge.com/wp-content/uploads/2025/04/drift-charge.svg"
-                    alt="Driftcharge"
-                    className="h-6 w-auto brightness-0 invert"
-                    onError={(e) => {
-                      e.currentTarget.style.display = "none";
-                    }}
-                  />
-                </div>
                 <div>
                   <h1 className="text-xl font-bold text-white">Driftcharge</h1>
                   <p className="text-xs text-gray-500">
