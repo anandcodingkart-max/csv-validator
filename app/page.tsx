@@ -1,65 +1,481 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useCallback } from "react";
+import CSVUploader from "@/components/CSVUploader";
+import DataTable from "@/components/DataTable";
+import Pagination from "@/components/Pagination";
+import HeaderErrorDisplay from "@/components/HeaderErrorDisplay";
+import ValidationResultTable from "@/components/ValidationResultTable";
+import AnimatedBackground from "@/components/AnimatedBackground";
+import {
+  validateHeaders,
+  validateRows,
+  convertToObjects,
+} from "@/utils/validator";
+import type {
+  HeaderValidationResult,
+  RowValidationResult,
+} from "@/utils/validator";
 
 export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+  const [csvData, setCsvData] = useState<{
+    headers: string[];
+    rows: string[][];
+    fileName: string;
+    dataObjects?: Record<string, any>[];
+  } | null>(null);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showUploader, setShowUploader] = useState(true);
+
+  // Validation states
+  const [headerValidation, setHeaderValidation] =
+    useState<HeaderValidationResult | null>(null);
+  const [rowValidation, setRowValidation] =
+    useState<RowValidationResult | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
+  const [showDataTable, setShowDataTable] = useState(false);
+  const [showValidationResults, setShowValidationResults] = useState(false);
+  const [isProcessingVerification, setIsProcessingVerification] =
+    useState(false);
+
+  const [stats, setStats] = useState({
+    numericCols: 0,
+    estimatedMemory: 0,
+  });
+
+  const handleFileParsed = useCallback(
+    (data: { headers: string[]; rows: string[][]; fileName: string }) => {
+      const dataObjects = convertToObjects(data.headers, data.rows);
+
+      setCsvData({
+        ...data,
+        dataObjects,
+      });
+      setCurrentPage(1);
+      setIsLoading(false);
+      setError(null);
+      setShowUploader(false);
+      setHeaderValidation(null);
+      setRowValidation(null);
+      setShowDataTable(true);
+      setShowValidationResults(false);
+
+      const numericCols = data.headers.filter((_, idx) =>
+        data.rows.slice(0, 100).some((row) => !isNaN(Number(row[idx]))),
+      ).length;
+
+      const estimatedMemory =
+        (data.rows.length * data.headers.length * 50) / 1024 / 1024;
+
+      setStats({
+        numericCols,
+        estimatedMemory: Math.round(estimatedMemory),
+      });
+    },
+    [],
   );
+
+  const handleParsingStart = useCallback(() => {
+    setIsLoading(true);
+    setError(null);
+    setHeaderValidation(null);
+    setRowValidation(null);
+  }, []);
+
+  const handleParsingError = useCallback((errorMsg: string) => {
+    setError(errorMsg);
+    setIsLoading(false);
+    setCsvData(null);
+    setShowUploader(true);
+    setShowDataTable(false);
+    setShowValidationResults(false);
+  }, []);
+
+  const handleUploadAnotherFile = useCallback(() => {
+    setCsvData(null);
+    setShowUploader(true);
+    setHeaderValidation(null);
+    setRowValidation(null);
+    setError(null);
+    setCurrentPage(1);
+    setShowDataTable(false);
+    setShowValidationResults(false);
+    setIsProcessingVerification(false);
+  }, []);
+
+  const handleProcessValidation = useCallback(async () => {
+    if (!csvData?.dataObjects || !csvData?.headers) return;
+
+    setIsValidating(true);
+
+    // Simulate async validation
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Checkpoint 1: Validate Headers
+    const headerResult = validateHeaders(csvData.headers);
+    setHeaderValidation(headerResult);
+
+    // If headers are invalid, stop here and hide data table
+    if (!headerResult.isValid) {
+      setShowDataTable(false);
+      setShowValidationResults(false);
+      setRowValidation(null);
+      setIsValidating(false);
+      return;
+    }
+
+    // Checkpoint 2: Validate Rows
+    const rowResult = validateRows(csvData.dataObjects);
+    setRowValidation(rowResult);
+
+    // Hide original data table and show validation results
+    setShowDataTable(false);
+    setShowValidationResults(true);
+
+    setIsValidating(false);
+  }, [csvData]);
+
+  const handleProcessVerification = useCallback(async () => {
+    if (!csvData?.dataObjects || !csvData?.headers || !rowValidation) return;
+
+    setIsProcessingVerification(true);
+
+    // Simulate processing verification
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Here you would send the successful data to your backend/verification system
+    // For now, just show an alert
+    const successData = csvData.dataObjects.filter((_, index) => {
+      const rowNumber = index + 2;
+      const rowErrors = rowValidation.errors.filter((e) => e.row === rowNumber);
+      return rowErrors.length === 0;
+    });
+
+    console.log("success data: ", successData);
+
+    alert(
+      `Processing verification for ${successData.length} successful records...\n\nThis would send the data to your verification system.`,
+    );
+
+    setIsProcessingVerification(false);
+  }, [csvData, rowValidation]);
+
+  const totalPages = csvData
+    ? Math.ceil(csvData.rows.length / itemsPerPage)
+    : 0;
+
+  // Determine which action buttons to show
+  const shouldShowValidateButton =
+    !showValidationResults &&
+    !headerValidation &&
+    !rowValidation &&
+    csvData &&
+    !showUploader;
+  const shouldShowVerificationButton =
+    showValidationResults &&
+    rowValidation &&
+    rowValidation.summary.successCount > 0;
+  const shouldShowSkipAndVerifyButton =
+    showValidationResults &&
+    rowValidation &&
+    rowValidation.summary.successCount > 0 &&
+    rowValidation.summary.successCount < rowValidation.summary.totalRecords;
+
+  return (
+    <>
+      <AnimatedBackground />
+
+      <div className="relative min-h-screen">
+        {/* Header */}
+        <header className="relative z-10 bg-gray-900/80 backdrop-blur-md border-b border-gray-800 sticky top-0">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
+                  <img
+                    src="https://driftcharge.com/wp-content/uploads/2025/04/drift-charge.svg"
+                    alt="Driftcharge"
+                    className="h-6 w-auto brightness-0 invert"
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none";
+                    }}
+                  />
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold text-white">Driftcharge</h1>
+                  <p className="text-xs text-gray-500">
+                    Subscription Data Validator
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons - Dynamic based on state */}
+              <div className="flex gap-3">
+                {/* Validate Data Button - Only show when data is loaded and not validated */}
+                {shouldShowValidateButton && (
+                  <button
+                    onClick={handleProcessValidation}
+                    disabled={isValidating}
+                    className="px-4 py-2 text-sm font-medium rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 transition-all text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isValidating ? (
+                      <>
+                        <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span>
+                        Validating...
+                      </>
+                    ) : (
+                      "🔍 Validate Data"
+                    )}
+                  </button>
+                )}
+
+                {/* Process Verification Button - Show when all data is valid */}
+                {shouldShowVerificationButton &&
+                  rowValidation.summary.successCount ===
+                    rowValidation.summary.totalRecords && (
+                    <button
+                      onClick={handleProcessVerification}
+                      disabled={isProcessingVerification}
+                      className="px-4 py-2 text-sm font-medium rounded-lg bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 transition-all text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isProcessingVerification ? (
+                        <>
+                          <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span>
+                          Processing...
+                        </>
+                      ) : (
+                        "✅ Process Verification"
+                      )}
+                    </button>
+                  )}
+
+                {/* Skip Error Rows & Process Button - Show when some rows are valid but not all */}
+                {shouldShowSkipAndVerifyButton && (
+                  <button
+                    onClick={handleProcessVerification}
+                    disabled={isProcessingVerification}
+                    className="px-4 py-2 text-sm font-medium rounded-lg bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-500 hover:to-orange-500 transition-all text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isProcessingVerification ? (
+                      <>
+                        <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span>
+                        Processing...
+                      </>
+                    ) : (
+                      "⚠️ Skip Error Rows & Process Verification"
+                    )}
+                  </button>
+                )}
+
+                {/* Upload Another File Button - Always show when data is loaded */}
+                {csvData && !showUploader && (
+                  <button
+                    onClick={handleUploadAnotherFile}
+                    className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-700 hover:border-gray-600 hover:bg-gray-800 transition-all text-gray-300"
+                  >
+                    📁 Upload Another File
+                  </button>
+                )}
+              </div>
+
+              <div className="hidden md:flex gap-3">
+                <div className="px-3 py-1 rounded-lg bg-blue-500/10 text-blue-400 text-xs font-mono border border-blue-500/20">
+                  16 Required Fields
+                </div>
+                <div className="px-3 py-1 rounded-lg bg-purple-500/10 text-purple-400 text-xs font-mono border border-purple-500/20">
+                  Shopify Format
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
+          {/* Hero Section */}
+          {showUploader && (
+            <div className="text-center mb-12 animate-slide-in">
+              <h2 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400 bg-clip-text text-transparent mb-4">
+                Subscription Data Validator
+              </h2>
+              <p className="text-gray-400 text-lg max-w-2xl mx-auto">
+                Validate subscription data against Shopify schema with 16
+                mandatory fields
+              </p>
+              <div className="flex flex-wrap justify-center gap-2 mt-4">
+                <span className="px-3 py-1 bg-gray-800 rounded-full text-xs text-gray-400">
+                  subscription_contract_id
+                </span>
+                <span className="px-3 py-1 bg-gray-800 rounded-full text-xs text-gray-400">
+                  customer_id
+                </span>
+                <span className="px-3 py-1 bg-gray-800 rounded-full text-xs text-gray-400">
+                  customer_name
+                </span>
+                <span className="px-3 py-1 bg-gray-800 rounded-full text-xs text-gray-400">
+                  customer_email
+                </span>
+                <span className="px-3 py-1 bg-gray-800 rounded-full text-xs text-gray-400">
+                  status
+                </span>
+                <span className="px-3 py-1 bg-gray-800 rounded-full text-xs text-gray-400">
+                  +11 more
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Upload Section */}
+          {showUploader && (
+            <div
+              className="mb-8 animate-slide-in"
+              style={{ animationDelay: "0.1s" }}
+            >
+              <CSVUploader
+                onFileParsed={handleFileParsed}
+                onParsingStart={handleParsingStart}
+                onParsingError={handleParsingError}
+              />
+            </div>
+          )}
+
+          {/* Error Message */}
+          {error && (
+            <div className="mb-8 p-4 bg-red-500/10 border-l-4 border-red-500 rounded-lg animate-slide-in">
+              <div className="flex items-center gap-3">
+                <div className="text-red-400">⚠️</div>
+                <div>
+                  <p className="text-red-400 font-medium">{error}</p>
+                  <p className="text-red-500/70 text-sm mt-1">
+                    Please verify your CSV format
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Loading State */}
+          {isLoading && !csvData && (
+            <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-16 text-center animate-slide-in border border-gray-700">
+              <div className="inline-block">
+                <div className="w-12 h-12 border-3 border-gray-700 border-t-blue-500 rounded-full animate-spin"></div>
+              </div>
+              <p className="text-gray-400 mt-4">Processing your data...</p>
+              <p className="text-sm text-gray-600 mt-2">
+                Large files may take a moment
+              </p>
+            </div>
+          )}
+
+          {/* Checkpoint 1: Header Validation Error */}
+          {headerValidation && !headerValidation.isValid && (
+            <HeaderErrorDisplay
+              missingFields={headerValidation.missingFields}
+              extraFields={headerValidation.extraFields}
+              onClose={handleCloseHeaderError}
+              onUploadNew={handleUploadAnotherFile}
+            />
+          )}
+
+          {/* Checkpoint 2: Validation Results Table */}
+          {showValidationResults && rowValidation && csvData && (
+            <ValidationResultTable
+              headers={csvData.headers}
+              rows={csvData.dataObjects || []}
+              errors={rowValidation.errors}
+            />
+          )}
+
+          {/* Original Data Table - Only show when no validation has been run */}
+          {csvData && showDataTable && !headerValidation && !rowValidation && (
+            <div
+              className="animate-slide-in"
+              style={{ animationDelay: "0.2s" }}
+            >
+              {/* Stats Dashboard */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-gray-700">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-3xl">📊</div>
+                    <div className="text-2xl font-bold text-blue-400">
+                      {csvData.rows.length.toLocaleString()}
+                    </div>
+                  </div>
+                  <p className="text-gray-400 text-sm">Total Records</p>
+                </div>
+
+                <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-gray-700">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-3xl">📋</div>
+                    <div className="text-2xl font-bold text-purple-400">
+                      {csvData.headers.length}
+                    </div>
+                  </div>
+                  <p className="text-gray-400 text-sm">Columns Found</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Expected: 16 columns
+                  </p>
+                </div>
+
+                <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-gray-700">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-3xl">✅</div>
+                    <div className="text-2xl font-bold text-green-400">
+                      Ready
+                    </div>
+                  </div>
+                  <p className="text-gray-400 text-sm">Validation Status</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Click Validate to check data
+                  </p>
+                </div>
+
+                <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-gray-700">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-3xl">📄</div>
+                    <div className="text-sm font-mono text-green-400 truncate max-w-[150px]">
+                      {csvData.fileName}
+                    </div>
+                  </div>
+                  <p className="text-gray-400 text-sm">File Name</p>
+                </div>
+              </div>
+
+              {/* Data Table */}
+              <div className="bg-gray-800/30 backdrop-blur-sm rounded-xl border border-gray-700 overflow-hidden">
+                <DataTable
+                  headers={csvData.headers}
+                  rows={csvData.rows}
+                  currentPage={currentPage}
+                  itemsPerPage={itemsPerPage}
+                />
+
+                {totalPages > 0 && (
+                  <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={setCurrentPage}
+                    itemsPerPage={itemsPerPage}
+                    onItemsPerPageChange={(items) => {
+                      setItemsPerPage(items);
+                      setCurrentPage(1);
+                    }}
+                    totalRows={csvData.rows.length}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    </>
+  );
+}
+
+// Helper function for header error close
+function handleCloseHeaderError() {
+  // This will be implemented in the component
 }
