@@ -197,6 +197,7 @@ export default function Home() {
         const payload = {
           shop: SHOP,
           finalFlag: isLastChunk,
+          firstFlag: i === 0,
           data: chunks[i],
         };
 
