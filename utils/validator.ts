@@ -20,6 +20,25 @@ export const REQUIRED_FIELDS = [
   "variant_id",
 ] as const;
 
+// Fields that require at least one to be present
+export const OPTIONAL_GROUP_FIELDS = [
+  "customer_id",
+  "customer_name",
+  "customer_email",
+  "status",
+  "billing_interval",
+  "billing_interval_count",
+  "billing_min_cycles",
+  "billing_max_cycles",
+  "delivery_interval",
+  "delivery_interval_count",
+  "quantity",
+  "price",
+  "next_billing_date",
+  "product_id",
+  "variant_id",
+] as const;
+
 export type RequiredField = (typeof REQUIRED_FIELDS)[number];
 
 export interface HeaderValidationResult {
@@ -77,9 +96,13 @@ const isValidShopifyId = (
   value: string,
   pattern: RegExp,
   type: string,
+  isRequired: boolean = false,
 ): { isValid: boolean; error?: string } => {
   if (!value || value.trim() === "") {
-    return { isValid: false, error: `${type} ID is required` };
+    if (isRequired) {
+      return { isValid: false, error: `${type} ID is required` };
+    }
+    return { isValid: true }; // Optional field, empty is allowed
   }
 
   const trimmedValue = value.trim();
@@ -99,9 +122,13 @@ const isValidNumber = (
   value: any,
   positive: boolean = false,
   allowZero: boolean = true,
+  isRequired: boolean = false,
 ): { isValid: boolean; error?: string } => {
   if (value === undefined || value === null || value === "") {
-    return { isValid: false, error: "Value is required" };
+    if (isRequired) {
+      return { isValid: false, error: "Value is required" };
+    }
+    return { isValid: true }; // Optional field, empty is allowed
   }
 
   let numValue: number;
@@ -110,7 +137,7 @@ const isValidNumber = (
     numValue = value;
   } else if (typeof value === "string") {
     if (value.trim() === "") {
-      return { isValid: false, error: "Value cannot be empty" };
+      return { isValid: true }; // Empty string is allowed for optional fields
     }
 
     const numberRegex = /^-?\d+(\.\d+)?$/;
@@ -138,9 +165,15 @@ const isValidNumber = (
 };
 
 // Validate price
-const isValidPrice = (value: any): { isValid: boolean; error?: string } => {
+const isValidPrice = (
+  value: any,
+  isRequired: boolean = false,
+): { isValid: boolean; error?: string } => {
   if (value === undefined || value === null || value === "") {
-    return { isValid: false, error: "Price is required" };
+    if (isRequired) {
+      return { isValid: false, error: "Price is required" };
+    }
+    return { isValid: true };
   }
 
   let numValue: number;
@@ -148,6 +181,9 @@ const isValidPrice = (value: any): { isValid: boolean; error?: string } => {
   if (typeof value === "number") {
     numValue = value;
   } else if (typeof value === "string") {
+    if (value.trim() === "") {
+      return { isValid: true };
+    }
     const priceRegex = /^-?\d+(\.\d+)?$/;
     if (!priceRegex.test(value.trim())) {
       return {
@@ -170,9 +206,13 @@ const isValidPrice = (value: any): { isValid: boolean; error?: string } => {
 // Validate date
 const isValidShopifyDate = (
   value: string,
+  isRequired: boolean = false,
 ): { isValid: boolean; error?: string } => {
   if (!value || value.trim() === "") {
-    return { isValid: false, error: "Next billing date is required" };
+    if (isRequired) {
+      return { isValid: false, error: "Next billing date is required" };
+    }
+    return { isValid: true };
   }
 
   const trimmedValue = value.trim();
@@ -209,61 +249,99 @@ const isValidShopifyDate = (
   };
 };
 
-// Checkpoint 1: Validate Headers
-export const validateHeaders = (headers: string[]): HeaderValidationResult => {
-  const requiredSet = new Set(REQUIRED_FIELDS);
-  const headerSet = new Set(headers);
+// Check if at least one of the optional fields is provided
+const hasAtLeastOneOptionalField = (
+  row: Record<string, any>,
+): { isValid: boolean; providedFields: string[] } => {
+  const providedFields: string[] = [];
 
-  const missingFields = REQUIRED_FIELDS.filter(
-    (field) => !headerSet.has(field),
-  );
-  const extraFields = headers.filter((header) => !requiredSet.has(header));
+  for (const field of OPTIONAL_GROUP_FIELDS) {
+    const value = row[field];
+    if (
+      value !== undefined &&
+      value !== null &&
+      value.toString().trim() !== ""
+    ) {
+      providedFields.push(field);
+    }
+  }
 
   return {
-    isValid: missingFields.length === 0 && extraFields.length === 0,
-    missingFields,
-    extraFields,
+    isValid: providedFields.length > 0,
+    providedFields,
   };
 };
 
-// Shopify-specific validation rules
+// Checkpoint 1: Validate Headers
+export const validateHeaders = (headers: string[]): HeaderValidationResult => {
+  // Normalize headers to lowercase for comparison
+  const normalizedHeaders = headers.map((h) => h.toLowerCase().trim());
+  const requiredField = "subscription_contract_id";
+  const optionalFields = REQUIRED_FIELDS.filter((f) => f !== requiredField);
+
+  const hasRequiredField = normalizedHeaders.includes(requiredField);
+
+  // Find missing optional fields (for informational purposes only)
+  const missingOptionalFields = optionalFields.filter(
+    (field) => !normalizedHeaders.includes(field),
+  );
+
+  // Find extra fields (fields not in REQUIRED_FIELDS)
+  const requiredSet = new Set(REQUIRED_FIELDS);
+  const extraFields = headers.filter(
+    (header) => !requiredSet.has(header.toLowerCase().trim()),
+  );
+
+  return {
+    isValid: hasRequiredField, // Only require subscription_contract_id
+    missingFields: hasRequiredField ? [] : [requiredField],
+    extraFields,
+    missingOptionalFields, // Add this for informational display
+  };
+};
+// Shopify-specific validation rules (all optional except subscription_contract_id)
 export const validationRules = {
   subscription_contract_id: {
     type: "shopify_contract_id",
+    required: true,
     validate: (value: any) =>
       isValidShopifyId(
         value,
         SHOPIFY_CONTRACT_ID_PATTERN,
         "SubscriptionContract",
+        true,
       ),
     message:
-      "Must be a valid Shopify Subscription Contract ID (gid://shopify/SubscriptionContract/{id})",
+      "Subscription Contract ID is required and must be a valid Shopify ID (gid://shopify/SubscriptionContract/{id})",
   },
   customer_id: {
     type: "shopify_customer_id",
+    required: false,
     validate: (value: any) =>
-      isValidShopifyId(value, SHOPIFY_CUSTOMER_ID_PATTERN, "Customer"),
+      isValidShopifyId(value, SHOPIFY_CUSTOMER_ID_PATTERN, "Customer", false),
     message:
       "Must be a valid Shopify Customer ID (gid://shopify/Customer/{id})",
   },
   customer_name: {
     type: "string",
+    required: false,
     validate: (value: any) => {
       if (!value || value.trim() === "") {
-        return { isValid: false, error: "Customer name is required" };
+        return { isValid: true }; // Optional
       }
       if (typeof value !== "string") {
         return { isValid: false, error: "Customer name must be a string" };
       }
       return { isValid: true };
     },
-    message: "Customer name is required and must be a string",
+    message: "Customer name must be a string",
   },
   customer_email: {
     type: "email",
+    required: false,
     validate: (value: any) => {
       if (!value || value.trim() === "") {
-        return { isValid: false, error: "Customer email is required" };
+        return { isValid: true }; // Optional
       }
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       const isValid = emailRegex.test(value.trim());
@@ -277,9 +355,10 @@ export const validationRules = {
   status: {
     type: "enum",
     values: SHOPIFY_STATUSES,
+    required: false,
     validate: (value: any) => {
       if (!value || value.trim() === "") {
-        return { isValid: false, error: "Status is required" };
+        return { isValid: true }; // Optional
       }
       const isValid = SHOPIFY_STATUSES.includes(value.toLowerCase() as any);
       return {
@@ -294,9 +373,10 @@ export const validationRules = {
   billing_interval: {
     type: "enum",
     values: SHOPIFY_INTERVALS,
+    required: false,
     validate: (value: any) => {
       if (!value || value.trim() === "") {
-        return { isValid: false, error: "Billing interval is required" };
+        return { isValid: true }; // Optional
       }
       const isValid = SHOPIFY_INTERVALS.includes(value.toLowerCase() as any);
       return {
@@ -311,27 +391,31 @@ export const validationRules = {
   billing_interval_count: {
     type: "number",
     positive: true,
-    validate: (value: any) => isValidNumber(value, true, false),
+    required: false,
+    validate: (value: any) => isValidNumber(value, true, false, false),
     message: "Must be a positive integer (e.g., 1, 2, 3)",
   },
   billing_min_cycles: {
     type: "number",
     positive: false,
-    validate: (value: any) => isValidNumber(value, false, true),
+    required: false,
+    validate: (value: any) => isValidNumber(value, false, true, false),
     message: "Must be a valid number",
   },
   billing_max_cycles: {
     type: "number",
     positive: false,
-    validate: (value: any) => isValidNumber(value, false, true),
+    required: false,
+    validate: (value: any) => isValidNumber(value, false, true, false),
     message: "Must be a valid number",
   },
   delivery_interval: {
     type: "enum",
     values: SHOPIFY_INTERVALS,
+    required: false,
     validate: (value: any) => {
       if (!value || value.trim() === "") {
-        return { isValid: false, error: "Delivery interval is required" };
+        return { isValid: true }; // Optional
       }
       const isValid = SHOPIFY_INTERVALS.includes(value.toLowerCase() as any);
       return {
@@ -346,41 +430,52 @@ export const validationRules = {
   delivery_interval_count: {
     type: "number",
     positive: true,
-    validate: (value: any) => isValidNumber(value, true, false),
+    required: false,
+    validate: (value: any) => isValidNumber(value, true, false, false),
     message: "Must be a positive integer (e.g., 1, 2, 3)",
   },
   quantity: {
     type: "number",
     positive: true,
-    validate: (value: any) => isValidNumber(value, true, false),
+    required: false,
+    validate: (value: any) => isValidNumber(value, true, false, false),
     message: "Must be a positive integer (e.g., 1, 2, 3)",
   },
   price: {
     type: "price",
-    validate: (value: any) => isValidPrice(value),
+    required: false,
+    validate: (value: any) => isValidPrice(value, false),
     message: "Must be a valid price (e.g., 10.54, 100, 0.99)",
   },
   next_billing_date: {
     type: "date",
-    validate: (value: any) => isValidShopifyDate(value),
+    required: false,
+    validate: (value: any) => isValidShopifyDate(value, false),
     message: "Must be a valid date (YYYY-MM-DD or Shopify ISO format)",
   },
   product_id: {
     type: "shopify_product_id",
+    required: false,
     validate: (value: any) =>
-      isValidShopifyId(value, SHOPIFY_PRODUCT_ID_PATTERN, "Product"),
+      isValidShopifyId(value, SHOPIFY_PRODUCT_ID_PATTERN, "Product", false),
     message: "Must be a valid Shopify Product ID (gid://shopify/Product/{id})",
   },
   variant_id: {
     type: "shopify_variant_id",
+    required: false,
     validate: (value: any) =>
-      isValidShopifyId(value, SHOPIFY_VARIANT_ID_PATTERN, "ProductVariant"),
+      isValidShopifyId(
+        value,
+        SHOPIFY_VARIANT_ID_PATTERN,
+        "ProductVariant",
+        false,
+      ),
     message:
       "Must be a valid Shopify Product Variant ID (gid://shopify/ProductVariant/{id})",
   },
 };
 
-// New validation: Check for unique subscription_contract_id
+// Validation for unique subscription_contract_id
 const validateUniqueContractIds = (
   data: Record<string, any>[],
 ): ValidationError[] => {
@@ -393,7 +488,7 @@ const validateUniqueContractIds = (
       if (!contractIdMap.has(contractId)) {
         contractIdMap.set(contractId, []);
       }
-      contractIdMap.get(contractId)!.push(index + 2); // +2 for header and 0-index
+      contractIdMap.get(contractId)!.push(index + 2);
     }
   });
 
@@ -414,7 +509,7 @@ const validateUniqueContractIds = (
   return errors;
 };
 
-// New validation: Check if billing_interval equals delivery_interval
+// Validation for intervals match
 const validateIntervalsMatch = (
   data: Record<string, any>[],
 ): ValidationError[] => {
@@ -424,7 +519,13 @@ const validateIntervalsMatch = (
     const billingInterval = row.billing_interval;
     const deliveryInterval = row.delivery_interval;
 
-    if (billingInterval && deliveryInterval) {
+    // Only validate if both are provided
+    if (
+      billingInterval &&
+      deliveryInterval &&
+      billingInterval.toString().trim() !== "" &&
+      deliveryInterval.toString().trim() !== ""
+    ) {
       const billingIntervalStr = billingInterval
         .toString()
         .toLowerCase()
@@ -449,7 +550,7 @@ const validateIntervalsMatch = (
   return errors;
 };
 
-// New validation: Check if billing_interval_count and delivery_interval_count are valid Shopify values
+// Validation for interval counts
 const validateIntervalCounts = (
   data: Record<string, any>[],
 ): ValidationError[] => {
@@ -459,8 +560,9 @@ const validateIntervalCounts = (
     const billingIntervalCount = row.billing_interval_count;
     const deliveryIntervalCount = row.delivery_interval_count;
     const billingInterval = row.billing_interval;
+    const deliveryInterval = row.delivery_interval;
 
-    // Validate billing_interval_count
+    // Validate billing_interval_count if provided
     if (
       billingIntervalCount !== undefined &&
       billingIntervalCount !== null &&
@@ -493,8 +595,7 @@ const validateIntervalCounts = (
         return;
       }
 
-      // Shopify-specific validation for interval counts
-      if (billingInterval) {
+      if (billingInterval && billingInterval.toString().trim() !== "") {
         const interval = billingInterval.toString().toLowerCase().trim();
         if (interval === "day" && count > 365) {
           errors.push({
@@ -533,7 +634,7 @@ const validateIntervalCounts = (
       }
     }
 
-    // Validate delivery_interval_count
+    // Validate delivery_interval_count if provided
     if (
       deliveryIntervalCount !== undefined &&
       deliveryIntervalCount !== null &&
@@ -566,9 +667,7 @@ const validateIntervalCounts = (
         return;
       }
 
-      // Shopify-specific validation for delivery interval counts
-      const deliveryInterval = row.delivery_interval;
-      if (deliveryInterval) {
+      if (deliveryInterval && deliveryInterval.toString().trim() !== "") {
         const interval = deliveryInterval.toString().toLowerCase().trim();
         if (interval === "day" && count > 365) {
           errors.push({
@@ -620,28 +719,7 @@ const validateFieldValue = (
   const rule = rules[field];
   if (!rule) return { isValid: true };
 
-  const isEmpty = value === undefined || value === null || value === "";
-
-  const isRequiredField = [
-    "subscription_contract_id",
-    "customer_id",
-    "customer_name",
-    "customer_email",
-    "status",
-    "billing_interval",
-    "billing_interval_count",
-    "product_id",
-    "variant_id",
-  ].includes(field);
-
-  if (isRequiredField && isEmpty) {
-    return { isValid: false, error: `${field.replace(/_/g, " ")} is required` };
-  }
-
-  if (!isRequiredField && isEmpty) {
-    return { isValid: true };
-  }
-
+  // Use the rule's validate method which now handles optional fields correctly
   if (rule.validate) {
     return rule.validate(value);
   }
@@ -657,11 +735,29 @@ export const validateRows = (
   let successCount = 0;
   let failedCount = 0;
 
-  // First, validate individual fields
+  // First, validate individual fields and the "at least one optional field" rule
   data.forEach((row, rowIndex) => {
     let rowHasError = false;
 
-    for (const field of REQUIRED_FIELDS) {
+    // Validate subscription_contract_id (required)
+    const contractIdValidation = validateFieldValue(
+      "subscription_contract_id",
+      row.subscription_contract_id,
+      validationRules,
+    );
+    if (!contractIdValidation.isValid) {
+      errors.push({
+        row: rowIndex + 2,
+        column: "subscription_contract_id",
+        value: String(row.subscription_contract_id || ""),
+        error: contractIdValidation.error || "Invalid subscription contract ID",
+        severity: "error",
+      });
+      rowHasError = true;
+    }
+
+    // Validate all other fields (optional)
+    for (const field of OPTIONAL_GROUP_FIELDS) {
       const value = row[field];
       const validation = validateFieldValue(field, value, validationRules);
 
@@ -677,6 +773,19 @@ export const validateRows = (
       }
     }
 
+    // Check if at least one optional field is provided
+    const optionalCheck = hasAtLeastOneOptionalField(row);
+    if (!optionalCheck.isValid) {
+      errors.push({
+        row: rowIndex + 2,
+        column: "optional_fields",
+        value: "No optional fields provided",
+        error: `At least one of these fields is required: ${OPTIONAL_GROUP_FIELDS.join(", ")}`,
+        severity: "error",
+      });
+      rowHasError = true;
+    }
+
     if (rowHasError) {
       failedCount++;
     } else {
@@ -684,7 +793,7 @@ export const validateRows = (
     }
   });
 
-  // Add cross-row validations (these are added to the errors array)
+  // Add cross-row validations
   const uniqueContractErrors = validateUniqueContractIds(data);
   const intervalsMatchErrors = validateIntervalsMatch(data);
   const intervalCountErrors = validateIntervalCounts(data);

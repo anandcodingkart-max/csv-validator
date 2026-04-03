@@ -40,17 +40,17 @@ const HeaderErrorDisplay: React.FC<HeaderErrorDisplayProps> = ({
         {/* Missing Fields Section */}
         {missingFields.length > 0 && (
           <div>
-            <h4 className="text-red-400 font-semibold mb-3 flex items-center gap-2">
-              <span className="text-lg">❌</span>
-              Missing Required Columns ({missingFields.length})
+            <h4 className="text-yellow-400 font-semibold mb-3 flex items-center gap-2">
+              <span className="text-lg">⚠️</span>
+              Allowed Columns ({missingFields.length})
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {missingFields.map((field, idx) => (
                 <div
                   key={idx}
-                  className="bg-red-500/10 border border-red-500/20 rounded-lg p-3"
+                  className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3"
                 >
-                  <code className="text-red-400 font-mono text-sm">
+                  <code className="text-yellow-400 font-mono text-sm">
                     {field}
                   </code>
                   <p className="text-gray-500 text-xs mt-1">
@@ -65,8 +65,8 @@ const HeaderErrorDisplay: React.FC<HeaderErrorDisplayProps> = ({
         {/* Extra Fields Section */}
         {extraFields.length > 0 && (
           <div>
-            <h4 className="text-yellow-400 font-semibold mb-3 flex items-center gap-2">
-              <span className="text-lg">⚠️</span>
+            <h4 className="text-red-400 font-semibold mb-3 flex items-center gap-2">
+              <span className="text-lg">❌</span>
               Extra Columns Not Allowed ({extraFields.length})
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -75,7 +75,7 @@ const HeaderErrorDisplay: React.FC<HeaderErrorDisplayProps> = ({
                   key={idx}
                   className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3"
                 >
-                  <code className="text-yellow-400 font-mono text-sm">
+                  <code className="text-red-400 font-mono text-sm">
                     {field}
                   </code>
                   <p className="text-gray-500 text-xs mt-1">

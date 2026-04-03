@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import CSVUploader from "@/components/CSVUploader";
 import DataTable from "@/components/DataTable";
 import Pagination from "@/components/Pagination";
 import HeaderErrorDisplay from "@/components/HeaderErrorDisplay";
 import ValidationResultTable from "@/components/ValidationResultTable";
+import VerificationModal from "@/components/VerificationModal";
 import AnimatedBackground from "@/components/AnimatedBackground";
+import { saveSubscriptionData } from "@/utils/api";
 import {
   validateHeaders,
   validateRows,
@@ -16,6 +18,8 @@ import type {
   HeaderValidationResult,
   RowValidationResult,
 } from "@/utils/validator";
+
+const SHOP = "checkout-ui-build.myshopify.com";
 
 export default function Home() {
   const [csvData, setCsvData] = useState<{
@@ -41,6 +45,19 @@ export default function Home() {
   const [showValidationResults, setShowValidationResults] = useState(false);
   const [isProcessingVerification, setIsProcessingVerification] =
     useState(false);
+
+  // Modal states
+  const [showModal, setShowModal] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<
+    "idle" | "uploading" | "verifying" | "completed" | "failed"
+  >("idle");
+  const [currentChunk, setCurrentChunk] = useState(0);
+  const [totalChunks, setTotalChunks] = useState(0);
+  const [verificationStatus, setVerificationStatus] = useState<string>("");
+  const [errorCsvUrl, setErrorCsvUrl] = useState<string>("");
+
+  // Ref to track if component is mounted
+  const isMountedRef = useRef(true);
 
   const [stats, setStats] = useState({
     numericCols: 0,
@@ -119,7 +136,7 @@ export default function Home() {
     const headerResult = validateHeaders(csvData.headers);
     setHeaderValidation(headerResult);
 
-    // If headers are invalid, stop here and hide data table
+    // If subscription_contract_id is missing, stop here
     if (!headerResult.isValid) {
       setShowDataTable(false);
       setShowValidationResults(false);
@@ -140,29 +157,99 @@ export default function Home() {
   }, [csvData]);
 
   const handleProcessVerification = useCallback(async () => {
-    if (!csvData?.dataObjects || !csvData?.headers || !rowValidation) return;
+    if (!csvData?.dataObjects || !rowValidation) return;
 
-    setIsProcessingVerification(true);
-
-    // Simulate processing verification
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
-    // Here you would send the successful data to your backend/verification system
-    // For now, just show an alert
+    // Get only success data
     const successData = csvData.dataObjects.filter((_, index) => {
       const rowNumber = index + 2;
       const rowErrors = rowValidation.errors.filter((e) => e.row === rowNumber);
       return rowErrors.length === 0;
     });
 
-    console.log("success data: ", successData);
+    if (successData.length === 0) {
+      alert("No successful records to process");
+      return;
+    }
 
-    alert(
-      `Processing verification for ${successData.length} successful records...\n\nThis would send the data to your verification system.`,
-    );
+    setIsProcessingVerification(true);
+    setShowModal(true);
+    setUploadStatus("uploading");
+    setVerificationStatus("");
+    setErrorCsvUrl("");
 
-    setIsProcessingVerification(false);
+    // Create chunks of size 2
+    const chunkSize = 2;
+    const chunks = [];
+    for (let i = 0; i < successData.length; i += chunkSize) {
+      chunks.push(successData.slice(i, i + chunkSize));
+    }
+
+    setTotalChunks(chunks.length);
+
+    try {
+      // Upload chunks one by one
+      for (let i = 0; i < chunks.length; i++) {
+        if (!isMountedRef.current) return;
+
+        setCurrentChunk(i + 1);
+        const isLastChunk = i === chunks.length - 1;
+
+        const payload = {
+          shop: SHOP,
+          finalFlag: isLastChunk,
+          data: chunks[i],
+        };
+
+        await saveSubscriptionData(payload);
+
+        // Small delay between chunks to avoid overwhelming the server
+        if (!isLastChunk) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      }
+
+      // Start verification polling (modal will handle this)
+      if (isMountedRef.current) {
+        setUploadStatus("verifying");
+      }
+    } catch (error) {
+      console.error("Upload error:", error);
+      if (isMountedRef.current) {
+        setUploadStatus("failed");
+        setVerificationStatus("Failed");
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setIsProcessingVerification(false);
+      }
+    }
   }, [csvData, rowValidation]);
+
+  // Add this callback to handle status updates from modal
+  const handleStatusUpdate = useCallback(
+    (status: string, errorUrl?: string) => {
+      if (status === "Success") {
+        setUploadStatus("completed");
+        setVerificationStatus("Success");
+      } else if (status === "Failed") {
+        setUploadStatus("failed");
+        setVerificationStatus("Failed");
+        if (errorUrl) {
+          setErrorCsvUrl(errorUrl);
+        }
+      }
+    },
+    [],
+  );
+
+  const handleCloseModal = useCallback(() => {
+    setShowModal(false);
+    setUploadStatus("idle");
+    setCurrentChunk(0);
+    setTotalChunks(0);
+    setVerificationStatus("");
+    setErrorCsvUrl("");
+  }, []);
 
   const totalPages = csvData
     ? Math.ceil(csvData.rows.length / itemsPerPage)
@@ -195,6 +282,16 @@ export default function Home() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
+                  <img
+                    src="https://driftcharge.com/wp-content/uploads/2025/04/drift-charge.svg"
+                    alt="Driftcharge"
+                    className="h-6 w-auto brightness-0 invert"
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none";
+                    }}
+                  />
+                </div>
                 <div>
                   <h1 className="text-xl font-bold text-white">Driftcharge</h1>
                   <p className="text-xs text-gray-500">
@@ -203,9 +300,8 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Action Buttons - Dynamic based on state */}
+              {/* Action Buttons */}
               <div className="flex gap-3">
-                {/* Validate Data Button - Only show when data is loaded and not validated */}
                 {shouldShowValidateButton && (
                   <button
                     onClick={handleProcessValidation}
@@ -223,7 +319,6 @@ export default function Home() {
                   </button>
                 )}
 
-                {/* Process Verification Button - Show when all data is valid */}
                 {shouldShowVerificationButton &&
                   rowValidation.summary.successCount ===
                     rowValidation.summary.totalRecords && (
@@ -243,7 +338,6 @@ export default function Home() {
                     </button>
                   )}
 
-                {/* Skip Error Rows & Process Button - Show when some rows are valid but not all */}
                 {shouldShowSkipAndVerifyButton && (
                   <button
                     onClick={handleProcessVerification}
@@ -256,12 +350,11 @@ export default function Home() {
                         Processing...
                       </>
                     ) : (
-                      "⚠️ Skip Error Rows & Process Verification"
+                      "⚠️ Skip Error Rows & Process"
                     )}
                   </button>
                 )}
 
-                {/* Upload Another File Button - Always show when data is loaded */}
                 {csvData && !showUploader && (
                   <button
                     onClick={handleUploadAnotherFile}
@@ -360,17 +453,22 @@ export default function Home() {
             </div>
           )}
 
-          {/* Checkpoint 1: Header Validation Error */}
+          {/* Header Validation Error */}
           {headerValidation && !headerValidation.isValid && (
             <HeaderErrorDisplay
               missingFields={headerValidation.missingFields}
               extraFields={headerValidation.extraFields}
-              onClose={handleCloseHeaderError}
+              missingOptionalFields={headerValidation.missingOptionalFields}
+              onClose={() => {
+                setHeaderValidation(null);
+                setShowUploader(true);
+                setCsvData(null);
+              }}
               onUploadNew={handleUploadAnotherFile}
             />
           )}
 
-          {/* Checkpoint 2: Validation Results Table */}
+          {/* Validation Results Table */}
           {showValidationResults && rowValidation && csvData && (
             <ValidationResultTable
               headers={csvData.headers}
@@ -379,7 +477,7 @@ export default function Home() {
             />
           )}
 
-          {/* Original Data Table - Only show when no validation has been run */}
+          {/* Original Data Table */}
           {csvData && showDataTable && !headerValidation && !rowValidation && (
             <div
               className="animate-slide-in"
@@ -406,7 +504,7 @@ export default function Home() {
                   </div>
                   <p className="text-gray-400 text-sm">Columns Found</p>
                   <p className="text-xs text-gray-500 mt-1">
-                    Expected: 16 columns
+                    Expected: subscription_contract_id + optional
                   </p>
                 </div>
 
@@ -461,11 +559,19 @@ export default function Home() {
           )}
         </main>
       </div>
+
+      {/* Verification Modal */}
+      {/* Verification Modal */}
+      <VerificationModal
+        isOpen={showModal}
+        onClose={handleCloseModal}
+        totalChunks={totalChunks}
+        currentChunk={currentChunk}
+        status={uploadStatus}
+        verificationStatus={verificationStatus}
+        errorCsvUrl={errorCsvUrl}
+        onStatusUpdate={handleStatusUpdate}
+      />
     </>
   );
-}
-
-// Helper function for header error close
-function handleCloseHeaderError() {
-  // This will be implemented in the component
 }

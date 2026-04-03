@@ -276,7 +276,7 @@ const ValidationResultTable: React.FC<ValidationResultTableProps> = ({
           <div className="flex items-center justify-between mb-2">
             <div className="text-3xl">📈</div>
             <div
-              className={`text-2xl font-bold ${failedCount === 0 ? "text-green-400" : "text-yellow-400"}`}
+              className={`text-2xl font-bold ${failedCount === 0 ? "text-green-400" : "text-red-400"}`}
             >
               {failedCount === 0 ? "Passed" : "Failed"}
             </div>
